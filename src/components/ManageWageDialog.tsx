@@ -75,8 +75,8 @@ export function ManageWageDialog({ open, onOpenChange }: { open: boolean; onOpen
                 : `Update ${selected?.name}'s wage to ${wageText}?`}
             </p>
             <div className="flex flex-col-reverse gap-3 sm:flex-row">
-              <Button variant="outline" size="xl" className="flex-1" onClick={() => setConfirming(false)}>Cancel</Button>
-              <Button size="xl" className="flex-1" onClick={confirm} disabled={saving}>
+              <Button variant="outline" size="xl" className="w-full sm:flex-1" onClick={() => setConfirming(false)}>Cancel</Button>
+              <Button size="xl" className="w-full sm:flex-1" onClick={confirm} disabled={saving}>
                 {saving && <Loader2 className="animate-spin" />} Confirm
               </Button>
             </div>
@@ -143,8 +143,8 @@ export function ManageWageDialog({ open, onOpenChange }: { open: boolean; onOpen
 
             {error && <p className="text-sm font-medium text-destructive">{error}</p>}
             <div className="flex flex-col-reverse gap-3 sm:flex-row">
-              <Button variant="outline" size="xl" className="flex-1" onClick={() => onOpenChange(false)}>Cancel</Button>
-              <Button size="xl" className="flex-1" onClick={review}>Continue</Button>
+              <Button variant="outline" size="xl" className="w-full sm:flex-1" onClick={() => onOpenChange(false)}>Cancel</Button>
+              <Button size="xl" className="w-full sm:flex-1" onClick={review}>Continue</Button>
             </div>
           </div>
         )}

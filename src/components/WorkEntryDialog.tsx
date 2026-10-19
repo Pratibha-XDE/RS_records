@@ -102,8 +102,8 @@ export function WorkEntryDialog({
               Work has already been recorded for this employee on this date. Would you like to edit the existing entry?
             </div>
             <div className="flex flex-col-reverse gap-3 sm:flex-row">
-              <Button variant="outline" size="xl" className="flex-1" onClick={() => setDuplicate(null)}>Go Back</Button>
-              <Button size="xl" className="flex-1" onClick={() => loadRecord(duplicate)}>Edit Existing Entry</Button>
+              <Button variant="outline" size="xl" className="w-full sm:flex-1" onClick={() => setDuplicate(null)}>Go Back</Button>
+              <Button size="xl" className="w-full sm:flex-1" onClick={() => loadRecord(duplicate)}>Edit Existing Entry</Button>
             </div>
           </div>
         ) : (
@@ -139,8 +139,8 @@ export function WorkEntryDialog({
               <PaymentToggle value={status} onChange={setStatus} />
             </Field>
             <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row">
-              <Button type="button" variant="outline" size="xl" className="flex-1" onClick={() => onOpenChange(false)}>Cancel</Button>
-              <Button type="submit" size="xl" className="flex-1" disabled={saving}>
+              <Button type="button" variant="outline" size="xl" className="w-full sm:flex-1" onClick={() => onOpenChange(false)}>Cancel</Button>
+              <Button type="submit" size="xl" className="w-full sm:flex-1" disabled={saving}>
                 {saving && <Loader2 className="animate-spin" />} Save Work
               </Button>
             </div>

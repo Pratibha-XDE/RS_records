@@ -92,8 +92,8 @@ export function EmployeeFormDialog({ open, onOpenChange, employee }: { open: boo
           </Field>
           {wage && <WageTypePicker value={wageType} onChange={setWageType} />}
           <div className="flex flex-col-reverse gap-3 pt-2 sm:flex-row">
-            <Button type="button" variant="outline" size="xl" className="flex-1" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button type="submit" size="xl" className="flex-1" disabled={saving}>
+            <Button type="button" variant="outline" size="xl" className="w-full sm:flex-1" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button type="submit" size="xl" className="w-full sm:flex-1" disabled={saving}>
               {saving && <Loader2 className="animate-spin" />} Save Employee
             </Button>
           </div>
