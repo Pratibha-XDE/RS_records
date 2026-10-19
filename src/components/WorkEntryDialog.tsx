@@ -19,7 +19,7 @@ export function WorkEntryDialog({
   open: boolean;
   onOpenChange: (o: boolean) => void;
   employee: Employee | null;
-  record?: WorkRecord;
+  record?: WorkRecord | undefined;
 }) {
   const navigate = useNavigate();
   const [editing, setEditing] = useState<WorkRecord | undefined>();

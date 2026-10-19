@@ -29,7 +29,7 @@ function LogsPage() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [applied, setApplied] = useState<{ from: string; to: string }>({ from: "", to: "" });
-  const [dialog, setDialog] = useState<{ open: boolean; record?: WorkRecord }>({ open: false });
+  const [dialog, setDialog] = useState<{ open: boolean; record?: WorkRecord | undefined }>({ open: false });
 
   useEffect(() => {
     if (!authService.isLoggedIn()) navigate({ to: "/" });

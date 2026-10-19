@@ -34,7 +34,7 @@ export function seedState(): AppState {
     updatedAt: now,
   });
 
-  const [r, a, s, sn] = employees;
+  const [r, a, s, sn] = employees as [Employee, Employee, Employee, Employee];
   return {
     employees,
     records: [

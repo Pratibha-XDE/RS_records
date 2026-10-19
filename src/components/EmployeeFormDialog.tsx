@@ -9,7 +9,7 @@ import { wageService } from "@/services/wageService";
 import { Field, RupeeInput, WageTypePicker, bigDialog, bigInput } from "./shared";
 import { formatWage } from "@/utils/format";
 
-export function EmployeeFormDialog({ open, onOpenChange, employee }: { open: boolean; onOpenChange: (o: boolean) => void; employee?: Employee }) {
+export function EmployeeFormDialog({ open, onOpenChange, employee }: { open: boolean; onOpenChange: (o: boolean) => void; employee?: Employee | undefined }) {
   const [name, setName] = useState("");
   const [profile, setProfile] = useState("");
   const [phone, setPhone] = useState("");
