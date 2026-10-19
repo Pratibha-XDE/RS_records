@@ -28,7 +28,7 @@ export function WorkEntryDialog({
   const [minutes, setMinutes] = useState("");
   const [rate, setRate] = useState("");
   const [status, setStatus] = useState<PaymentStatus>("not_paid");
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [errors, setErrors] = useState<Partial<Record<"date" | "hours" | "minutes" | "rate", string>>>({});
   const [duplicate, setDuplicate] = useState<WorkRecord | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -58,7 +58,7 @@ export function WorkEntryDialog({
   async function save(e: React.FormEvent) {
     e.preventDefault();
     if (!employee) return;
-    const errs: Record<string, string> = {};
+    const errs: Partial<Record<"date" | "hours" | "minutes" | "rate", string>> = {};
     const h = Number(hours || 0);
     const m = Number(minutes || 0);
     if (!date) errs.date = "Please choose a date.";

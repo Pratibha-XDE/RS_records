@@ -16,7 +16,7 @@ export function EmployeeFormDialog({ open, onOpenChange, employee }: { open: boo
   const [age, setAge] = useState("");
   const [wage, setWage] = useState("");
   const [wageType, setWageType] = useState<WageType>("hourly");
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [errors, setErrors] = useState<Partial<Record<"name" | "phone" | "age" | "wage", string>>>({});
   const [saving, setSaving] = useState(false);
   const global = wageService.getGlobal();
 
@@ -33,7 +33,7 @@ export function EmployeeFormDialog({ open, onOpenChange, employee }: { open: boo
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
-    const errs: Record<string, string> = {};
+    const errs: Partial<Record<"name" | "phone" | "age" | "wage", string>> = {};
     if (!name.trim()) errs.name = "Please enter the employee's name.";
     if (phone.trim() && !/^\+?[\d\s-]{6,15}$/.test(phone.trim())) errs.phone = "Please enter a valid phone number.";
     if (age && (!Number.isInteger(Number(age)) || Number(age) <= 0 || Number(age) > 120)) errs.age = "Age must be a positive number.";

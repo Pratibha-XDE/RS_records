@@ -4,9 +4,9 @@ export type PaymentStatus = "paid" | "not_paid";
 export interface Employee {
   id: string;
   name: string;
-  workProfile?: string;
-  phone?: string;
-  age?: number;
+  workProfile?: string | undefined;
+  phone?: string | undefined;
+  age?: number | undefined;
   wageAmount: number;
   wageType: WageType;
   wageSource: "global" | "individual";
@@ -19,7 +19,7 @@ export interface WageSettings {
   amount: number;
   type: WageType;
   scope: "global" | "employee";
-  employeeId?: string;
+  employeeId?: string | undefined;
   effectiveFrom: string;
   createdAt: string;
 }

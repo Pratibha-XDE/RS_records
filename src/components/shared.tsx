@@ -4,7 +4,7 @@ import type { PaymentStatus, WageType } from "@/types";
 import { Label } from "@/components/ui/label";
 import { wageTypeLabel } from "@/utils/format";
 
-export function Field({ label, error, htmlFor, children, hint }: { label: string; error?: string; htmlFor?: string; hint?: string; children: React.ReactNode }) {
+export function Field({ label, error, htmlFor, children, hint }: { label: string; error?: string | undefined; htmlFor?: string | undefined; hint?: string | undefined; children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
       <Label htmlFor={htmlFor} className="text-base font-medium">{label}</Label>

@@ -4,11 +4,11 @@ import { uid } from "@/utils/format";
 
 export interface EmployeeInput {
   name: string;
-  workProfile?: string;
-  phone?: string;
-  age?: number;
-  wageAmount?: number; // empty => global
-  wageType?: WageType;
+  workProfile?: string | undefined;
+  phone?: string | undefined;
+  age?: number | undefined;
+  wageAmount?: number | undefined; // empty => global
+  wageType?: WageType | undefined;
 }
 
 export const employeeService = {
