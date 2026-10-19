@@ -17,9 +17,11 @@ const KEY = "dwc_state_v1";
 let state: AppState | null = null;
 const listeners = new Set<() => void>();
 
+let serverState: AppState | null = null;
+
 function load(): AppState {
   if (state) return state;
-  if (typeof window === "undefined") return seedState();
+  if (typeof window === "undefined") return (serverState ??= seedState());
   try {
     const raw = window.localStorage.getItem(KEY);
     state = raw ? (JSON.parse(raw) as AppState) : seedState();
