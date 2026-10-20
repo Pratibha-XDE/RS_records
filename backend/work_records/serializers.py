@@ -4,6 +4,7 @@ from django.db.models import Sum
 from rest_framework import serializers
 
 from employees.models import Employee
+from wages.models import WageBasis
 from wages.services import resolve_effective_wage
 from .models import DailyWorkRecord, Payment
 from .services import (
@@ -79,6 +80,13 @@ class DailyWorkRecordSerializer(serializers.ModelSerializer):
     Serializer for DailyWorkRecord instances.
     Enforces server-side earnings calculations, wage snapshot preservation, and derived payment summary.
     """
+    base_amount = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        required=False,
+        min_value=Decimal('0.00'),
+        help_text="Actual regular earnings for daily-paid workers. For hourly-paid workers, calculated as hours_worked * wage_rate."
+    )
     employee_name = serializers.CharField(source='employee.name', read_only=True)
     total_paid = serializers.SerializerMethodField()
     balance_due = serializers.SerializerMethodField()
@@ -111,7 +119,6 @@ class DailyWorkRecordSerializer(serializers.ModelSerializer):
             'id',
             'wage_rate',
             'wage_basis',
-            'base_amount',
             'overtime_amount',
             'total_earnings',
             'total_paid',
@@ -143,14 +150,14 @@ class DailyWorkRecordSerializer(serializers.ModelSerializer):
         return self._get_summary(obj)['payment_status']
 
     def validate_hours_worked(self, value):
-        if value < 0 or value > 24:
+        if value is None or value < 0 or value > 24:
             raise serializers.ValidationError("Hours worked must be between 0 and 24.")
         return value
 
     def validate_minutes_worked(self, value):
-        if value < 0 or value > 59:
-            raise serializers.ValidationError("Minutes worked must be between 0 and 59.")
-        return value
+        if value is not None and value != 0:
+            raise serializers.ValidationError("Only whole hours worked are accepted.")
+        return value or 0
 
     def validate_overtime_minutes(self, value):
         if value < 0:
@@ -172,9 +179,17 @@ class DailyWorkRecordSerializer(serializers.ModelSerializer):
         if not work_date:
             raise serializers.ValidationError({'work_date': 'Work date is required.'})
 
-        # Enforce that active employee check applies on creation or modification
-        if not employee.is_active:
-            raise serializers.ValidationError({'employee': f"Employee '{employee.name}' is inactive. Cannot record or modify work records."})
+        # Inactive employees cannot receive new work records, but corrections to historical records are allowed
+        if instance is None:
+            if not employee.is_active:
+                raise serializers.ValidationError({
+                    'employee': f"Employee '{employee.name}' is inactive. Cannot create new work records."
+                })
+        else:
+            if employee != instance.employee and not employee.is_active:
+                raise serializers.ValidationError({
+                    'employee': f"Cannot reassign work record to inactive employee '{employee.name}'."
+                })
 
         # Check unique constraint (one record per employee per work_date)
         qs = DailyWorkRecord.objects.filter(employee=employee, work_date=work_date)
@@ -202,6 +217,7 @@ class DailyWorkRecordSerializer(serializers.ModelSerializer):
         minutes_worked = validated_data.get('minutes_worked', 0)
         overtime_minutes = validated_data.get('overtime_minutes', 0)
         extra_pay = validated_data.get('extra_pay', Decimal('0.00'))
+        manual_base = validated_data.get('base_amount')
         notes = validated_data.get('notes', '')
 
         # Resolve wage rate effective on work_date
@@ -217,9 +233,10 @@ class DailyWorkRecordSerializer(serializers.ModelSerializer):
             wage_rate=wage_rate,
             wage_basis=wage_basis,
             hours_worked=hours_worked,
+            manual_base_amount=manual_base,
+            extra_pay=extra_pay,
             minutes_worked=minutes_worked,
             overtime_minutes=overtime_minutes,
-            extra_pay=extra_pay,
         )
 
         return DailyWorkRecord.objects.create(
@@ -242,6 +259,7 @@ class DailyWorkRecordSerializer(serializers.ModelSerializer):
         Updates an existing work record.
         Preserves the historical wage snapshot (wage_rate and wage_basis) unless employee/date
         were modified (when no payments exist).
+        Allows correcting historical work records with financial safeguards.
         """
         employee = validated_data.get('employee', instance.employee)
         work_date = validated_data.get('work_date', instance.work_date)
@@ -264,14 +282,21 @@ class DailyWorkRecordSerializer(serializers.ModelSerializer):
             wage_rate = instance.wage_rate
             wage_basis = instance.wage_basis
 
+        # Determine manual base amount for daily wage basis
+        if wage_basis == WageBasis.DAILY:
+            manual_base = validated_data.get('base_amount', instance.base_amount)
+        else:
+            manual_base = None
+
         # Recalculate earnings with current inputs and preserved/resolved rate
         calc = calculate_work_record_earnings(
             wage_rate=wage_rate,
             wage_basis=wage_basis,
             hours_worked=hours_worked,
+            manual_base_amount=manual_base,
+            extra_pay=extra_pay,
             minutes_worked=minutes_worked,
             overtime_minutes=overtime_minutes,
-            extra_pay=extra_pay,
         )
 
         # Ensure that new total_earnings does not drop below existing total_paid

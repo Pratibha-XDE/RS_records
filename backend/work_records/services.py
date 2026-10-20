@@ -21,33 +21,29 @@ def calculate_work_record_earnings(
     wage_rate: Decimal,
     wage_basis: str,
     hours_worked: int,
-    minutes_worked: int,
+    manual_base_amount: Decimal = None,
+    extra_pay: Decimal = Decimal('0.00'),
+    minutes_worked: int = 0,
     overtime_minutes: int = 0,
-    extra_pay: Decimal = Decimal('0.00')
 ) -> dict:
     """
     Calculates base_amount, overtime_amount, and total_earnings server-side.
     
     Rules:
-    - Standard workday duration is configured via settings.STANDARD_WORKDAY_HOURS (default 8.0 hours).
-    - Overtime multiplier is configured via settings.OVERTIME_RATE_MULTIPLIER (default 1.0).
-    - Monthly wage divisor is configured via settings.MONTHLY_DAYS_DIVISOR (default 30.0 days).
-    - For hourly wage basis:
-        base_amount = (hours + minutes / 60) * wage_rate
-        overtime_amount = (overtime_minutes / 60) * (wage_rate * multiplier)
-    - For daily wage basis:
-        base_amount = ((hours + minutes / 60) / standard_hours) * wage_rate
-        overtime_amount = (overtime_minutes / 60) * ((wage_rate / standard_hours) * multiplier)
-    - For monthly wage basis:
-        daily_equiv = wage_rate / monthly_days
-        base_amount = ((hours + minutes / 60) / standard_hours) * daily_equiv
-        overtime_amount = (overtime_minutes / 60) * ((daily_equiv / standard_hours) * multiplier)
-    - total_earnings = base_amount + overtime_amount + extra_pay
+    - No fixed working schedule or mandatory standard workday.
+    - Whole hours worked are entered by admin.
+    - For daily-paid workers (wage_basis == 'daily'):
+        - wage_rate is the agreed daily reference rate snapshot.
+        - base_amount is entered manually by the admin (or defaults to agreed wage_rate if not specified).
+        - Earnings are NOT automatically prorated by hours worked.
+        - overtime_amount is Decimal('0.00').
+    - For hourly-paid workers (wage_basis == 'hourly'):
+        - Regular earnings = whole hours worked * applicable hourly rate.
+        - If historical minutes_worked exists, it is handled without fixed schedule assumptions.
+        - base_amount = regular earnings.
+        - overtime_amount is Decimal('0.00').
+    - Total earnings = base_amount + extra_pay.
     """
-    standard_workday_hours = getattr(settings, 'STANDARD_WORKDAY_HOURS', Decimal('8.0'))
-    overtime_multiplier = getattr(settings, 'OVERTIME_RATE_MULTIPLIER', Decimal('1.0'))
-    monthly_days_divisor = getattr(settings, 'MONTHLY_DAYS_DIVISOR', Decimal('30.0'))
-
     if hours_worked < 0 or hours_worked > 24:
         raise ValidationError({'hours_worked': 'Hours worked must be between 0 and 24.'})
 
@@ -63,32 +59,33 @@ def calculate_work_record_earnings(
     if wage_rate < Decimal('0.00'):
         raise ValidationError({'wage_rate': 'Wage rate cannot be negative.'})
 
-    regular_duration_hours = Decimal(hours_worked) + (Decimal(minutes_worked) / Decimal('60.0'))
-    ot_duration_hours = Decimal(overtime_minutes) / Decimal('60.0')
+    if not isinstance(wage_rate, Decimal):
+        wage_rate = Decimal(str(wage_rate))
 
     if wage_basis == WageBasis.HOURLY:
-        base_amount = quantize_currency(regular_duration_hours * wage_rate)
-        ot_hourly_rate = wage_rate * overtime_multiplier
-        overtime_amount = quantize_currency(ot_duration_hours * ot_hourly_rate)
+        if minutes_worked:
+            duration_hours = Decimal(hours_worked) + (Decimal(minutes_worked) / Decimal('60.0'))
+        else:
+            duration_hours = Decimal(hours_worked)
+        base_amount = quantize_currency(duration_hours * wage_rate)
+        overtime_amount = Decimal('0.00')
 
     elif wage_basis == WageBasis.DAILY:
-        base_amount = quantize_currency((regular_duration_hours / standard_workday_hours) * wage_rate)
-        hourly_equiv = wage_rate / standard_workday_hours
-        ot_hourly_rate = hourly_equiv * overtime_multiplier
-        overtime_amount = quantize_currency(ot_duration_hours * ot_hourly_rate)
-
-    elif wage_basis == WageBasis.MONTHLY:
-        daily_equiv = wage_rate / monthly_days_divisor
-        hourly_equiv = daily_equiv / standard_workday_hours
-        base_amount = quantize_currency((regular_duration_hours / standard_workday_hours) * daily_equiv)
-        ot_hourly_rate = hourly_equiv * overtime_multiplier
-        overtime_amount = quantize_currency(ot_duration_hours * ot_hourly_rate)
+        if manual_base_amount is not None:
+            if not isinstance(manual_base_amount, Decimal):
+                manual_base_amount = Decimal(str(manual_base_amount))
+            if manual_base_amount < Decimal('0.00'):
+                raise ValidationError({'base_amount': 'Base earnings cannot be negative.'})
+            base_amount = quantize_currency(manual_base_amount)
+        else:
+            base_amount = quantize_currency(wage_rate)
+        overtime_amount = Decimal('0.00')
 
     else:
-        raise ValidationError({'wage_basis': f"Unsupported wage basis: '{wage_basis}'"})
+        raise ValidationError({'wage_basis': f"Unsupported wage basis: '{wage_basis}'. Only daily and hourly are supported."})
 
     extra_pay_quantized = quantize_currency(extra_pay)
-    total_earnings = quantize_currency(base_amount + overtime_amount + extra_pay_quantized)
+    total_earnings = quantize_currency(base_amount + extra_pay_quantized)
 
     return {
         'base_amount': base_amount,

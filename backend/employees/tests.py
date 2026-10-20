@@ -6,7 +6,8 @@ from django.test import TestCase
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from work_records.models import DailyWorkRecord
+from work_records.models import DailyWorkRecord, Payment
+from wages.models import GlobalWageSetting, WageBasis
 from .models import Employee
 
 
@@ -182,3 +183,169 @@ class EmployeeAPITests(TestCase):
         work_record.refresh_from_db()
         self.assertEqual(work_record.employee_id, self.employee.id)
         self.assertEqual(work_record.total_earnings, Decimal('800.00'))
+
+    def test_balance_summary_authenticated_admin(self):
+        self.client.force_authenticate(user=self.admin_user)
+        response = self.client.get(f'/api/employees/{self.employee.id}/balance_summary/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['employee_id'], self.employee.id)
+        self.assertEqual(response.data['employee_name'], "Vijay Kumar")
+        self.assertTrue(response.data['is_active'])
+
+    def test_balance_summary_unauthenticated_rejected(self):
+        response = self.client.get(f'/api/employees/{self.employee.id}/balance_summary/')
+        self.assertIn(response.status_code, [status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN])
+
+    def test_balance_summary_non_staff_forbidden(self):
+        self.client.force_authenticate(user=self.regular_user)
+        response = self.client.get(f'/api/employees/{self.employee.id}/balance_summary/')
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_balance_summary_nonexistent_employee(self):
+        self.client.force_authenticate(user=self.admin_user)
+        response = self.client.get('/api/employees/99999/balance_summary/')
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_balance_summary_no_work_records(self):
+        self.client.force_authenticate(user=self.admin_user)
+        new_emp = Employee.objects.create(name="New Person")
+        response = self.client.get(f'/api/employees/{new_emp.id}/balance_summary/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['total_earnings'], "0.00")
+        self.assertEqual(response.data['total_paid'], "0.00")
+        self.assertEqual(response.data['outstanding_balance'], "0.00")
+        self.assertEqual(response.data['work_record_count'], 0)
+        self.assertEqual(response.data['unpaid_record_count'], 0)
+        self.assertEqual(response.data['partially_paid_record_count'], 0)
+        self.assertEqual(response.data['paid_record_count'], 0)
+
+    def test_balance_summary_correct_aggregation_and_counts(self):
+        self.client.force_authenticate(user=self.admin_user)
+        # Record 1: Unpaid (earnings 1000.00, paid 0.00)
+        r1 = DailyWorkRecord.objects.create(
+            employee=self.employee,
+            work_date=datetime.date(2026, 10, 1),
+            hours_worked=8,
+            wage_rate=Decimal('1000.00'),
+            wage_basis='daily',
+            base_amount=Decimal('1000.00'),
+            total_earnings=Decimal('1000.00')
+        )
+        # Record 2: Partially paid (earnings 1000.00, paid 400.00)
+        r2 = DailyWorkRecord.objects.create(
+            employee=self.employee,
+            work_date=datetime.date(2026, 10, 2),
+            hours_worked=8,
+            wage_rate=Decimal('1000.00'),
+            wage_basis='daily',
+            base_amount=Decimal('1000.00'),
+            total_earnings=Decimal('1000.00')
+        )
+        Payment.objects.create(
+            work_record=r2,
+            amount=Decimal('400.00'),
+            payment_date=datetime.date(2026, 10, 2)
+        )
+        # Record 3: Fully paid (earnings 1000.00, paid 1000.00)
+        r3 = DailyWorkRecord.objects.create(
+            employee=self.employee,
+            work_date=datetime.date(2026, 10, 3),
+            hours_worked=8,
+            wage_rate=Decimal('1000.00'),
+            wage_basis='daily',
+            base_amount=Decimal('1000.00'),
+            total_earnings=Decimal('1000.00')
+        )
+        Payment.objects.create(
+            work_record=r3,
+            amount=Decimal('1000.00'),
+            payment_date=datetime.date(2026, 10, 3)
+        )
+
+        response = self.client.get(f'/api/employees/{self.employee.id}/balance_summary/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # Total earnings = 3000.00, Total paid = 1400.00, Outstanding balance = 1600.00
+        self.assertEqual(response.data['total_earnings'], "3000.00")
+        self.assertEqual(response.data['total_paid'], "1400.00")
+        self.assertEqual(response.data['outstanding_balance'], "1600.00")
+        self.assertEqual(response.data['work_record_count'], 3)
+        self.assertEqual(response.data['unpaid_record_count'], 1)
+        self.assertEqual(response.data['partially_paid_record_count'], 1)
+        self.assertEqual(response.data['paid_record_count'], 1)
+
+    def test_balance_summary_no_duplicate_counting_multiple_payments(self):
+        self.client.force_authenticate(user=self.admin_user)
+        # Single record with multiple partial payments
+        r = DailyWorkRecord.objects.create(
+            employee=self.employee,
+            work_date=datetime.date(2026, 10, 10),
+            hours_worked=8,
+            wage_rate=Decimal('1000.00'),
+            wage_basis='daily',
+            base_amount=Decimal('1000.00'),
+            total_earnings=Decimal('1000.00')
+        )
+        Payment.objects.create(work_record=r, amount=Decimal('200.00'), payment_date=datetime.date(2026, 10, 10))
+        Payment.objects.create(work_record=r, amount=Decimal('300.00'), payment_date=datetime.date(2026, 10, 11))
+        Payment.objects.create(work_record=r, amount=Decimal('100.00'), payment_date=datetime.date(2026, 10, 12))
+
+        response = self.client.get(f'/api/employees/{self.employee.id}/balance_summary/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # Total earnings must strictly remain 1000.00, NOT 3000.00!
+        self.assertEqual(response.data['total_earnings'], "1000.00")
+        self.assertEqual(response.data['total_paid'], "600.00")
+        self.assertEqual(response.data['outstanding_balance'], "400.00")
+        self.assertEqual(response.data['work_record_count'], 1)
+        self.assertEqual(response.data['partially_paid_record_count'], 1)
+
+    def test_balance_summary_inactive_employee(self):
+        self.client.force_authenticate(user=self.admin_user)
+        DailyWorkRecord.objects.create(
+            employee=self.employee,
+            work_date=datetime.date(2026, 10, 15),
+            hours_worked=8,
+            wage_rate=Decimal('800.00'),
+            wage_basis='daily',
+            base_amount=Decimal('800.00'),
+            total_earnings=Decimal('800.00')
+        )
+        # Deactivate
+        self.employee.is_active = False
+        self.employee.save()
+
+        response = self.client.get(f'/api/employees/{self.employee.id}/balance_summary/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data['is_active'])
+        self.assertEqual(response.data['total_earnings'], "800.00")
+        self.assertEqual(response.data['outstanding_balance'], "800.00")
+        self.assertEqual(response.data['work_record_count'], 1)
+
+    def test_employee_transactions_history_endpoint(self):
+        self.client.force_authenticate(user=self.admin_user)
+        DailyWorkRecord.objects.create(
+            employee=self.employee,
+            work_date=datetime.date(2026, 10, 1),
+            hours_worked=8,
+            wage_rate=Decimal('800.00'),
+            wage_basis='daily',
+            base_amount=Decimal('800.00'),
+            total_earnings=Decimal('800.00')
+        )
+        response = self.client.get(f'/api/employees/{self.employee.id}/transactions/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        results = response.data['results'] if 'results' in response.data else response.data
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]['employee'], self.employee.id)
+
+    def test_employee_applicable_wage_rate_and_basis_fields(self):
+        self.client.force_authenticate(user=self.admin_user)
+        GlobalWageSetting.objects.create(
+            wage_amount=Decimal('750.00'),
+            wage_basis=WageBasis.DAILY,
+            effective_from=datetime.date(2026, 1, 1)
+        )
+        response = self.client.get(f'/api/employees/{self.employee.id}/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['applicable_wage_rate'], '750.00')
+        self.assertEqual(response.data['applicable_wage_basis'], 'daily')
+

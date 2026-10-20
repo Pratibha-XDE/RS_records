@@ -7,8 +7,11 @@ from django.test import TestCase
 from rest_framework import status
 from rest_framework.test import APIClient
 
+from django.contrib.admin.sites import AdminSite
+from django.db.models import ProtectedError
 from employees.models import Employee
 from wages.models import EmployeeWageRate, GlobalWageSetting, WageBasis
+from .admin import PaymentAdmin, PaymentInline
 from .models import DailyWorkRecord, Payment
 from .services import (
     calculate_work_record_earnings,
@@ -124,63 +127,65 @@ class WorkRecordAndPaymentModelTests(TestCase):
 
 
 class EarningsCalculationTests(TestCase):
-    def test_daily_wage_standard_8_hours(self):
-        # 8 hours on 800 daily wage -> 800.00
+    def test_daily_wage_standard_hours(self):
+        # 8 hours on 800 daily wage without manual input -> defaults to 800.00
         calc = calculate_work_record_earnings(
             wage_rate=Decimal('800.00'),
             wage_basis=WageBasis.DAILY,
             hours_worked=8,
-            minutes_worked=0,
-            overtime_minutes=0,
             extra_pay=Decimal('0.00')
         )
         self.assertEqual(calc['base_amount'], Decimal('800.00'))
         self.assertEqual(calc['overtime_amount'], Decimal('0.00'))
         self.assertEqual(calc['total_earnings'], Decimal('800.00'))
 
-    def test_daily_wage_half_day(self):
-        # 4 hours on 800 daily wage -> 400.00
+    def test_daily_wage_half_day_not_prorated(self):
+        # 4 hours on 800 daily wage is NOT prorated -> remains 800.00
         calc = calculate_work_record_earnings(
             wage_rate=Decimal('800.00'),
             wage_basis=WageBasis.DAILY,
             hours_worked=4,
-            minutes_worked=0,
-            overtime_minutes=0,
             extra_pay=Decimal('0.00')
         )
-        self.assertEqual(calc['base_amount'], Decimal('400.00'))
-        self.assertEqual(calc['total_earnings'], Decimal('400.00'))
+        self.assertEqual(calc['base_amount'], Decimal('800.00'))
+        self.assertEqual(calc['total_earnings'], Decimal('800.00'))
 
-    def test_daily_wage_with_overtime_and_extra_pay(self):
-        # 8 hours + 60 min overtime + 50 extra pay
-        # Rate: 800/8 = 100/hr, overtime = 1 hr * 100 * 1.0 = 100
+    def test_daily_wage_manual_earnings_entry(self):
+        # Admin manually enters actual earnings of 850.00 for the day
+        calc = calculate_work_record_earnings(
+            wage_rate=Decimal('800.00'),
+            wage_basis=WageBasis.DAILY,
+            hours_worked=6,
+            manual_base_amount=Decimal('850.00'),
+            extra_pay=Decimal('0.00')
+        )
+        self.assertEqual(calc['base_amount'], Decimal('850.00'))
+        self.assertEqual(calc['total_earnings'], Decimal('850.00'))
+
+    def test_daily_wage_with_extra_pay(self):
+        # 8 hours + 50 extra pay
         calc = calculate_work_record_earnings(
             wage_rate=Decimal('800.00'),
             wage_basis=WageBasis.DAILY,
             hours_worked=8,
-            minutes_worked=0,
-            overtime_minutes=60,
             extra_pay=Decimal('50.00')
         )
         self.assertEqual(calc['base_amount'], Decimal('800.00'))
-        self.assertEqual(calc['overtime_amount'], Decimal('100.00'))
+        self.assertEqual(calc['overtime_amount'], Decimal('0.00'))
         self.assertEqual(calc['extra_pay'], Decimal('50.00'))
-        self.assertEqual(calc['total_earnings'], Decimal('950.00'))
+        self.assertEqual(calc['total_earnings'], Decimal('850.00'))
 
     def test_hourly_wage_calculation(self):
-        # 7 hours 30 mins at 100/hr -> 7.5 * 100 = 750.00
+        # 7 whole hours at 100/hr + 20 extra pay -> 700 + 20 = 720.00
         calc = calculate_work_record_earnings(
             wage_rate=Decimal('100.00'),
             wage_basis=WageBasis.HOURLY,
             hours_worked=7,
-            minutes_worked=30,
-            overtime_minutes=45,
             extra_pay=Decimal('20.00')
         )
-        self.assertEqual(calc['base_amount'], Decimal('750.00'))
-        # Overtime: 45 / 60 * 100 = 75.00
-        self.assertEqual(calc['overtime_amount'], Decimal('75.00'))
-        self.assertEqual(calc['total_earnings'], Decimal('845.00'))
+        self.assertEqual(calc['base_amount'], Decimal('700.00'))
+        self.assertEqual(calc['overtime_amount'], Decimal('0.00'))
+        self.assertEqual(calc['total_earnings'], Decimal('720.00'))
 
     def test_payment_summary_statuses(self):
         # Not paid
@@ -232,7 +237,6 @@ class WorkRecordAndPaymentAPITests(TestCase):
             'work_date': '2026-10-01',
             'hours_worked': 8,
             'minutes_worked': 0,
-            'overtime_minutes': 60,
             'extra_pay': '50.00',
             'notes': 'Excavation day 1'
         }
@@ -241,12 +245,64 @@ class WorkRecordAndPaymentAPITests(TestCase):
         self.assertEqual(response.data['wage_rate'], '800.00')
         self.assertEqual(response.data['wage_basis'], 'daily')
         self.assertEqual(response.data['base_amount'], '800.00')
-        self.assertEqual(response.data['overtime_amount'], '100.00')
+        self.assertEqual(response.data['overtime_amount'], '0.00')
         self.assertEqual(response.data['extra_pay'], '50.00')
-        self.assertEqual(response.data['total_earnings'], '950.00')
+        self.assertEqual(response.data['total_earnings'], '850.00')
         self.assertEqual(response.data['total_paid'], '0.00')
-        self.assertEqual(response.data['balance_due'], '950.00')
+        self.assertEqual(response.data['balance_due'], '850.00')
         self.assertEqual(response.data['payment_status'], 'not_paid')
+
+    def test_create_daily_work_record_with_manual_earnings(self):
+        self.client.force_authenticate(user=self.admin_user)
+        payload = {
+            'employee': self.employee.id,
+            'work_date': '2026-10-02',
+            'hours_worked': 7,
+            'base_amount': '950.00',
+            'extra_pay': '25.00'
+        }
+        response = self.client.post('/api/work-records/', payload)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['wage_rate'], '800.00')  # Reference snapshot preserved
+        self.assertEqual(response.data['base_amount'], '950.00')  # Manual entry accepted
+        self.assertEqual(response.data['extra_pay'], '25.00')
+        self.assertEqual(response.data['total_earnings'], '975.00')
+
+    def test_create_hourly_work_record_whole_hours(self):
+        self.client.force_authenticate(user=self.admin_user)
+        hourly_emp = Employee.objects.create(name="Hourly Worker")
+        EmployeeWageRate.objects.create(
+            employee=hourly_emp,
+            wage_amount=Decimal('150.00'),
+            wage_basis=WageBasis.HOURLY,
+            effective_from=datetime.date(2026, 1, 1)
+        )
+        payload = {
+            'employee': hourly_emp.id,
+            'work_date': '2026-10-02',
+            'hours_worked': 6,
+            'extra_pay': '30.00'
+        }
+        response = self.client.post('/api/work-records/', payload)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        # 6 hours * 150 = 900 base, 900 + 30 = 930 total
+        self.assertEqual(response.data['wage_rate'], '150.00')
+        self.assertEqual(response.data['wage_basis'], 'hourly')
+        self.assertEqual(response.data['base_amount'], '900.00')
+        self.assertEqual(response.data['extra_pay'], '30.00')
+        self.assertEqual(response.data['total_earnings'], '930.00')
+
+    def test_reject_fractional_minutes_in_work_record(self):
+        self.client.force_authenticate(user=self.admin_user)
+        payload = {
+            'employee': self.employee.id,
+            'work_date': '2026-10-03',
+            'hours_worked': 8,
+            'minutes_worked': 30
+        }
+        response = self.client.post('/api/work-records/', payload)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('minutes_worked', response.data)
 
     def test_reject_work_record_for_inactive_employee(self):
         self.client.force_authenticate(user=self.admin_user)
@@ -277,22 +333,19 @@ class WorkRecordAndPaymentAPITests(TestCase):
         r2 = self.client.post('/api/work-records/', payload)
         self.assertEqual(r2.status_code, status.HTTP_400_BAD_REQUEST)
 
-    def test_client_financial_fields_ignored_and_computed_server_side(self):
+    def test_client_cannot_spoof_wage_rate(self):
         self.client.force_authenticate(user=self.admin_user)
-        # Attempt to spoof wage_rate and total_earnings
+        # Attempt to spoof wage_rate
         payload = {
             'employee': self.employee.id,
             'work_date': '2026-10-04',
             'hours_worked': 8,
-            'minutes_worked': 0,
             'wage_rate': '9999.00',
-            'total_earnings': '99999.00'
         }
         response = self.client.post('/api/work-records/', payload)
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         # Server must use resolved wage rate 800.00, not spoofed 9999.00
         self.assertEqual(response.data['wage_rate'], '800.00')
-        self.assertEqual(response.data['total_earnings'], '800.00')
 
     def test_update_work_record_preserves_wage_snapshot_and_recomputes_earnings(self):
         self.client.force_authenticate(user=self.admin_user)
@@ -311,16 +364,24 @@ class WorkRecordAndPaymentAPITests(TestCase):
         self.global_wage.wage_amount = Decimal('1200.00')
         self.global_wage.save()
 
-        # 3. Client updates hours worked to 4 (half day)
+        # 3. Client updates hours worked to 4
         response = self.client.patch(f'/api/work-records/{record.id}/', {'hours_worked': 4})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
         record.refresh_from_db()
         # Rate snapshot must remain 800.00 (NOT updated to 1200.00)
         self.assertEqual(record.wage_rate, Decimal('800.00'))
-        # Earnings recalculated proportionally: 4/8 * 800 = 400.00
-        self.assertEqual(record.base_amount, Decimal('400.00'))
-        self.assertEqual(record.total_earnings, Decimal('400.00'))
+        # Daily earnings are not prorated by hours worked, so base_amount remains 800.00
+        self.assertEqual(record.base_amount, Decimal('800.00'))
+        self.assertEqual(record.total_earnings, Decimal('800.00'))
+
+        # 4. Client updates manual daily base_amount to 500.00
+        patch_resp = self.client.patch(f'/api/work-records/{record.id}/', {'base_amount': '500.00'})
+        self.assertEqual(patch_resp.status_code, status.HTTP_200_OK)
+        record.refresh_from_db()
+        self.assertEqual(record.base_amount, Decimal('500.00'))
+        self.assertEqual(record.total_earnings, Decimal('500.00'))
+        self.assertEqual(record.wage_rate, Decimal('800.00'))
 
     def test_filter_work_records(self):
         self.client.force_authenticate(user=self.admin_user)
@@ -471,3 +532,217 @@ class WorkRecordAndPaymentAPITests(TestCase):
         response = self.client.delete(f'/api/work-records/{record.id}/')
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertTrue(DailyWorkRecord.objects.filter(id=record.id).exists())
+
+    def test_work_record_delete_database_protected_error(self):
+        # Database level check: deleting a work record with payments raises ProtectedError
+        record = DailyWorkRecord.objects.create(
+            employee=self.employee,
+            work_date=datetime.date(2026, 10, 25),
+            wage_rate=Decimal('500.00'),
+            wage_basis='daily',
+            base_amount=Decimal('500.00'),
+            total_earnings=Decimal('500.00')
+        )
+        Payment.objects.create(
+            work_record=record,
+            amount=Decimal('200.00'),
+            payment_date=datetime.date(2026, 10, 25)
+        )
+        with self.assertRaises(ProtectedError):
+            record.delete()
+
+    def test_django_admin_payment_history_protections(self):
+        # Admin interface must protect payment history from ordinary editing or deletion
+        site = AdminSite()
+        payment_admin = PaymentAdmin(Payment, site)
+        payment_inline = PaymentInline(DailyWorkRecord, site)
+
+        self.assertFalse(payment_admin.has_delete_permission(None))
+        self.assertFalse(payment_admin.has_change_permission(None))
+        self.assertFalse(payment_inline.has_delete_permission(None))
+        self.assertFalse(payment_inline.has_change_permission(None))
+
+    def test_editing_unpaid_work_record(self):
+        self.client.force_authenticate(user=self.admin_user)
+        record = DailyWorkRecord.objects.create(
+            employee=self.employee,
+            work_date=datetime.date(2026, 10, 26),
+            hours_worked=8,
+            wage_rate=Decimal('800.00'),
+            wage_basis='daily',
+            base_amount=Decimal('800.00'),
+            total_earnings=Decimal('800.00')
+        )
+        # Edit notes and extra pay on unpaid record
+        response = self.client.patch(f'/api/work-records/{record.id}/', {
+            'extra_pay': '100.00',
+            'notes': 'Overtime work'
+        })
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        record.refresh_from_db()
+        self.assertEqual(record.extra_pay, Decimal('100.00'))
+        self.assertEqual(record.total_earnings, Decimal('900.00'))
+        self.assertEqual(record.notes, 'Overtime work')
+
+    def test_editing_partially_paid_work_record(self):
+        self.client.force_authenticate(user=self.admin_user)
+        record = DailyWorkRecord.objects.create(
+            employee=self.employee,
+            work_date=datetime.date(2026, 10, 27),
+            hours_worked=8,
+            wage_rate=Decimal('1000.00'),
+            wage_basis='daily',
+            base_amount=Decimal('1000.00'),
+            total_earnings=Decimal('1000.00')
+        )
+        Payment.objects.create(
+            work_record=record,
+            amount=Decimal('400.00'),
+            payment_date=datetime.date(2026, 10, 27)
+        )
+        # Permitted edit: reduce base_amount to 600.00 (which is >= 400.00 already paid)
+        response = self.client.patch(f'/api/work-records/{record.id}/', {
+            'base_amount': '600.00'
+        })
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        record.refresh_from_db()
+        self.assertEqual(record.base_amount, Decimal('600.00'))
+        self.assertEqual(record.total_earnings, Decimal('600.00'))
+
+    def test_reject_earnings_reduction_below_already_paid(self):
+        self.client.force_authenticate(user=self.admin_user)
+        record = DailyWorkRecord.objects.create(
+            employee=self.employee,
+            work_date=datetime.date(2026, 10, 28),
+            hours_worked=8,
+            wage_rate=Decimal('1000.00'),
+            wage_basis='daily',
+            base_amount=Decimal('1000.00'),
+            total_earnings=Decimal('1000.00')
+        )
+        Payment.objects.create(
+            work_record=record,
+            amount=Decimal('600.00'),
+            payment_date=datetime.date(2026, 10, 28)
+        )
+        # Attempt to reduce base_amount to 400.00 (below 600.00 already paid)
+        response = self.client.patch(f'/api/work-records/{record.id}/', {
+            'base_amount': '400.00'
+        })
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('cannot be lower than the amount already paid', response.data['detail'])
+
+    def test_preserving_payments_during_earnings_corrections(self):
+        self.client.force_authenticate(user=self.admin_user)
+        record = DailyWorkRecord.objects.create(
+            employee=self.employee,
+            work_date=datetime.date(2026, 10, 29),
+            hours_worked=8,
+            wage_rate=Decimal('1000.00'),
+            wage_basis='daily',
+            base_amount=Decimal('1000.00'),
+            total_earnings=Decimal('1000.00')
+        )
+        p1 = Payment.objects.create(
+            work_record=record,
+            amount=Decimal('300.00'),
+            payment_date=datetime.date(2026, 10, 29),
+            payment_method='Cash'
+        )
+        p2 = Payment.objects.create(
+            work_record=record,
+            amount=Decimal('200.00'),
+            payment_date=datetime.date(2026, 10, 30),
+            payment_method='UPI'
+        )
+
+        # Update notes and extra pay
+        response = self.client.patch(f'/api/work-records/{record.id}/', {
+            'extra_pay': '150.00',
+            'notes': 'Bonus added'
+        })
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # Ensure payment records remain unchanged
+        self.assertEqual(record.payments.count(), 2)
+        p1.refresh_from_db()
+        p2.refresh_from_db()
+        self.assertEqual(p1.amount, Decimal('300.00'))
+        self.assertEqual(p2.amount, Decimal('200.00'))
+
+    def test_inactive_employee_allows_historical_corrections(self):
+        self.client.force_authenticate(user=self.admin_user)
+        record = DailyWorkRecord.objects.create(
+            employee=self.employee,
+            work_date=datetime.date(2026, 10, 30),
+            hours_worked=8,
+            wage_rate=Decimal('800.00'),
+            wage_basis='daily',
+            base_amount=Decimal('800.00'),
+            total_earnings=Decimal('800.00')
+        )
+        # Deactivate employee
+        self.employee.is_active = False
+        self.employee.save()
+
+        # Admin corrects notes on inactive employee's historical record -> should succeed!
+        response = self.client.patch(f'/api/work-records/{record.id}/', {
+            'notes': 'Corrected notes for inactive employee'
+        })
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        record.refresh_from_db()
+        self.assertEqual(record.notes, 'Corrected notes for inactive employee')
+
+    def test_inactive_employee_allows_payments_against_outstanding_balances(self):
+        self.client.force_authenticate(user=self.admin_user)
+        record = DailyWorkRecord.objects.create(
+            employee=self.employee,
+            work_date=datetime.date(2026, 10, 31),
+            hours_worked=8,
+            wage_rate=Decimal('1000.00'),
+            wage_basis='daily',
+            base_amount=Decimal('1000.00'),
+            total_earnings=Decimal('1000.00')
+        )
+        # Deactivate employee
+        self.employee.is_active = False
+        self.employee.save()
+
+        # Admin disburses payment to inactive employee against outstanding balance
+        pay_payload = {
+            'work_record': record.id,
+            'amount': '500.00',
+            'payment_date': '2026-11-01',
+            'payment_method': 'Bank Transfer'
+        }
+        response = self.client.post('/api/payments/', pay_payload)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['amount'], '500.00')
+
+        # Check updated status on work record
+        record_resp = self.client.get(f'/api/work-records/{record.id}/')
+        self.assertEqual(record_resp.data['total_paid'], '500.00')
+        self.assertEqual(record_resp.data['balance_due'], '500.00')
+        self.assertEqual(record_resp.data['payment_status'], 'partially_paid')
+
+    def test_transaction_consistency_on_failed_payment(self):
+        self.client.force_authenticate(user=self.admin_user)
+        record = DailyWorkRecord.objects.create(
+            employee=self.employee,
+            work_date=datetime.date(2026, 11, 2),
+            hours_worked=8,
+            wage_rate=Decimal('500.00'),
+            wage_basis='daily',
+            base_amount=Decimal('500.00'),
+            total_earnings=Decimal('500.00')
+        )
+        # Attempt overpayment
+        response = self.client.post('/api/payments/', {
+            'work_record': record.id,
+            'amount': '600.00',
+            'payment_date': '2026-11-02'
+        })
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        # No payment row created
+        self.assertEqual(Payment.objects.filter(work_record=record).count(), 0)
+

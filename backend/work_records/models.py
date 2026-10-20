@@ -151,7 +151,7 @@ class Payment(models.Model):
     """
     work_record = models.ForeignKey(
         DailyWorkRecord,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name='payments',
         db_column='work_record_id',
         help_text="Associated daily work record for which this payment was made."

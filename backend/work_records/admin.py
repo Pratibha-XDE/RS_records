@@ -6,7 +6,13 @@ class PaymentInline(admin.TabularInline):
     model = Payment
     extra = 0
     fields = ('amount', 'payment_date', 'payment_method', 'notes', 'created_at')
-    readonly_fields = ('created_at',)
+    readonly_fields = ('amount', 'payment_date', 'payment_method', 'notes', 'created_at')
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(DailyWorkRecord)
@@ -47,7 +53,14 @@ class PaymentAdmin(admin.ModelAdmin):
     search_fields = ('work_record__employee__name', 'payment_method', 'notes')
     date_hierarchy = 'payment_date'
     ordering = ('-payment_date', '-created_at')
+    readonly_fields = ('work_record', 'amount', 'payment_date', 'payment_method', 'notes', 'created_at')
 
     @admin.display(ordering='work_record__employee__name', description='Employee')
     def get_employee(self, obj):
         return obj.work_record.employee.name
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
