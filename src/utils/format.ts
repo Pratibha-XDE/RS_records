@@ -16,7 +16,8 @@ export const wageTypeLabel: Record<WageType, string> = {
 };
 const wageSuffix: Record<WageType, string> = { hourly: "hour", daily: "day", monthly: "month" };
 
-export const formatWage = (amount: number, type: WageType) => `${formatINR(amount)}/${wageSuffix[type]}`;
+export const formatWage = (amount: number, type: WageType) =>
+  `${formatINR(amount)}/${wageSuffix[type]}`;
 
 export const todayISO = () => {
   const d = new Date();

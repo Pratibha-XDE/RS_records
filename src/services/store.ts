@@ -1,9 +1,8 @@
 /**
- * Tiny localStorage-backed store. Services below are the only thing that
- * touch it, so they can later be swapped for Django REST API calls.
+ * Reactive application store for in-memory cache of backend entities.
+ * Operational data is populated through real Django REST Framework API requests.
  */
 import type { Employee, WageSettings, WorkRecord, WorkRecordAudit, WageType } from "@/types";
-import { seedState } from "./seed";
 
 export interface AppState {
   employees: Employee[];
@@ -13,31 +12,25 @@ export interface AppState {
   audits: WorkRecordAudit[];
 }
 
-const KEY = "dwc_state_v1";
-let state: AppState | null = null;
+export function createInitialState(): AppState {
+  return {
+    employees: [],
+    records: [],
+    wageSettings: [],
+    globalWage: { amount: 0, type: "daily" },
+    audits: [],
+  };
+}
+
+let state: AppState = createInitialState();
 const listeners = new Set<() => void>();
 
-let serverState: AppState | null = null;
-
-function load(): AppState {
-  if (state) return state;
-  if (typeof window === "undefined") return (serverState ??= seedState());
-  try {
-    const raw = window.localStorage.getItem(KEY);
-    state = raw ? (JSON.parse(raw) as AppState) : seedState();
-  } catch {
-    state = seedState();
-  }
+export function getState(): AppState {
   return state;
 }
 
-export function getState(): AppState {
-  return load();
-}
-
 export function setState(updater: (s: AppState) => AppState) {
-  state = updater(load());
-  if (typeof window !== "undefined") window.localStorage.setItem(KEY, JSON.stringify(state));
+  state = updater(state);
   listeners.forEach((l) => l());
 }
 
@@ -46,5 +39,8 @@ export function subscribe(l: () => void) {
   return () => listeners.delete(l);
 }
 
-/** Simulated network latency so loading states are visible. */
-export const delay = (ms = 350) => new Promise((r) => setTimeout(r, ms));
+export function resetState(): void {
+  state = createInitialState();
+  listeners.forEach((l) => l());
+}
+

@@ -4,10 +4,24 @@ import type { PaymentStatus, WageType } from "@/types";
 import { Label } from "@/components/ui/label";
 import { wageTypeLabel } from "@/utils/format";
 
-export function Field({ label, error, htmlFor, children, hint }: { label: string; error?: string | undefined; htmlFor?: string | undefined; hint?: string | undefined; children: React.ReactNode }) {
+export function Field({
+  label,
+  error,
+  htmlFor,
+  children,
+  hint,
+}: {
+  label: string;
+  error?: string | undefined;
+  htmlFor?: string | undefined;
+  hint?: string | undefined;
+  children: React.ReactNode;
+}) {
   return (
     <div className="space-y-1.5">
-      <Label htmlFor={htmlFor} className="text-base font-medium">{label}</Label>
+      <Label htmlFor={htmlFor} className="text-base font-medium">
+        {label}
+      </Label>
       {children}
       {hint && !error && <p className="text-sm text-muted-foreground">{hint}</p>}
       {error && <p className="text-sm font-medium text-destructive">{error}</p>}
@@ -16,21 +30,34 @@ export function Field({ label, error, htmlFor, children, hint }: { label: string
 }
 
 export function StatusBadge({ status }: { status: PaymentStatus }) {
-  const paid = status === "paid";
+  if (status === "paid") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full border border-success/30 bg-success-soft px-2.5 py-0.5 text-sm font-semibold text-success">
+        <Check className="size-4" /> Paid
+      </span>
+    );
+  }
+  if (status === "partially_paid") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-0.5 text-sm font-semibold text-primary">
+        <Clock className="size-4" /> Partially Paid
+      </span>
+    );
+  }
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-sm font-semibold",
-        paid ? "border-success/30 bg-success-soft text-success" : "border-warning/30 bg-warning-soft text-warning",
-      )}
-    >
-      {paid ? <Check className="size-4" /> : <Clock className="size-4" />}
-      {paid ? "Paid" : "Not Paid"}
+    <span className="inline-flex items-center gap-1 rounded-full border border-warning/30 bg-warning-soft px-2.5 py-0.5 text-sm font-semibold text-warning">
+      <Clock className="size-4" /> Not Paid
     </span>
   );
 }
 
-export function PaymentToggle({ value, onChange }: { value: PaymentStatus; onChange: (v: PaymentStatus) => void }) {
+export function PaymentToggle({
+  value,
+  onChange,
+}: {
+  value: PaymentStatus;
+  onChange: (v: PaymentStatus) => void;
+}) {
   const opt = (v: PaymentStatus, label: string) => {
     const active = value === v;
     const paid = v === "paid";
@@ -62,7 +89,13 @@ export function PaymentToggle({ value, onChange }: { value: PaymentStatus; onCha
   );
 }
 
-export function WageTypePicker({ value, onChange }: { value: WageType; onChange: (v: WageType) => void }) {
+export function WageTypePicker({
+  value,
+  onChange,
+}: {
+  value: WageType;
+  onChange: (v: WageType) => void;
+}) {
   return (
     <div role="radiogroup" className="grid grid-cols-3 gap-2">
       {(Object.keys(wageTypeLabel) as WageType[]).map((t) => (
@@ -74,7 +107,9 @@ export function WageTypePicker({ value, onChange }: { value: WageType; onChange:
           onClick={() => onChange(t)}
           className={cn(
             "h-12 rounded-lg border-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            value === t ? "border-primary bg-accent text-accent-foreground" : "border-border text-muted-foreground",
+            value === t
+              ? "border-primary bg-accent text-accent-foreground"
+              : "border-border text-muted-foreground",
           )}
         >
           {wageTypeLabel[t]}
@@ -87,7 +122,9 @@ export function WageTypePicker({ value, onChange }: { value: WageType; onChange:
 export function RupeeInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <div className="relative">
-      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base font-semibold text-muted-foreground">₹</span>
+      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base font-semibold text-muted-foreground">
+        ₹
+      </span>
       <input
         type="number"
         inputMode="decimal"

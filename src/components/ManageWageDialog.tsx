@@ -46,15 +46,23 @@ export function ManageWageDialog({ open, onOpenChange }: { open: boolean; onOpen
 
   async function confirm() {
     setSaving(true);
-    if (target === "all") {
-      await wageService.applyGlobal(Number(amount), type);
-      toast.success("Common wage updated.");
-    } else if (selected) {
-      await wageService.applyToEmployee(selected.id, Number(amount), type);
-      toast.success(`${selected.name}'s wage updated.`);
+    try {
+      if (target === "all") {
+        await wageService.applyGlobal(Number(amount), type);
+        toast.success("Common wage updated.");
+      } else if (selected) {
+        await wageService.applyToEmployee(selected.id, Number(amount), type);
+        toast.success(`${selected.name}'s wage updated.`);
+      }
+      onOpenChange(false);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to update wage setting.";
+      setError(msg);
+      toast.error(msg);
+      setConfirming(false);
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
-    onOpenChange(false);
   }
 
   const wageText = formatWage(Number(amount) || 0, type);

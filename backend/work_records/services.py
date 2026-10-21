@@ -37,6 +37,11 @@ def calculate_work_record_earnings(
         - base_amount is entered manually by the admin (or defaults to agreed wage_rate if not specified).
         - Earnings are NOT automatically prorated by hours worked.
         - overtime_amount is Decimal('0.00').
+    - For monthly-paid workers (wage_basis == 'monthly'):
+        - wage_rate is the agreed monthly salary reference snapshot.
+        - base_amount is entered manually by the admin as actual regular earnings for the work record.
+        - Never automatically divided by 30 or calculated from hours worked.
+        - overtime_amount is Decimal('0.00').
     - For hourly-paid workers (wage_basis == 'hourly'):
         - Regular earnings = whole hours worked * applicable hourly rate.
         - If historical minutes_worked exists, it is handled without fixed schedule assumptions.
@@ -64,7 +69,7 @@ def calculate_work_record_earnings(
 
     if wage_basis == WageBasis.HOURLY:
         if minutes_worked:
-            duration_hours = Decimal(hours_worked) + (Decimal(minutes_worked) / Decimal('60.0'))
+            duration_hours = Decimal(hours_worked) + (Decimal(minutes_worked) / Decimal('60'))
         else:
             duration_hours = Decimal(hours_worked)
         base_amount = quantize_currency(duration_hours * wage_rate)
@@ -81,8 +86,21 @@ def calculate_work_record_earnings(
             base_amount = quantize_currency(wage_rate)
         overtime_amount = Decimal('0.00')
 
+    elif wage_basis == WageBasis.MONTHLY:
+        if manual_base_amount is not None:
+            if not isinstance(manual_base_amount, Decimal):
+                manual_base_amount = Decimal(str(manual_base_amount))
+            if manual_base_amount < Decimal('0.00'):
+                raise ValidationError({'base_amount': 'Base earnings cannot be negative.'})
+            base_amount = quantize_currency(manual_base_amount)
+        else:
+            raise ValidationError({
+                'base_amount': 'Actual regular earnings (base amount) must be entered manually for monthly-paid work records.'
+            })
+        overtime_amount = Decimal('0.00')
+
     else:
-        raise ValidationError({'wage_basis': f"Unsupported wage basis: '{wage_basis}'. Only daily and hourly are supported."})
+        raise ValidationError({'wage_basis': f"Unsupported wage basis: '{wage_basis}'. Only hourly, daily, and monthly are supported."})
 
     extra_pay_quantized = quantize_currency(extra_pay)
     total_earnings = quantize_currency(base_amount + extra_pay_quantized)

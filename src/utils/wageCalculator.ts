@@ -1,14 +1,14 @@
 import type { WageType } from "@/types";
 
 /**
- * Business rules for non-hourly wages are NOT finalised yet.
- * Change these in one place once the rules are confirmed.
+ * Wage calculation rules:
+ * - Hourly: whole hours × applicable hourly rate (pro-rated by minutes if entered)
+ * - Daily: manually entered regular earnings for the workday (not prorated by hours)
+ * - Monthly: manually entered regular earnings for the work record (never divided by 30 or calculated from hours)
  */
 export const WAGE_RULES = {
-  /** Daily wage: one recorded day earns the full daily rate (no partial-day proration). */
-  dailyMode: "full_day" as const,
-  /** Monthly wage: one recorded day earns monthly rate / this many days. */
-  monthlyDaysDivisor: 30,
+  dailyMode: "manual_entry" as const,
+  monthlyMode: "manual_entry" as const,
 };
 
 const toPaise = (rupees: number) => Math.round(rupees * 100);
@@ -18,7 +18,12 @@ export function calculateEarnings(input: {
   rate: number;
   hours: number;
   minutes: number;
+  baseAmount?: number;
 }): number {
+  if (input.baseAmount !== undefined) {
+    return Math.round(input.baseAmount * 100) / 100;
+  }
+
   const ratePaise = toPaise(input.rate || 0);
   switch (input.wageType) {
     case "hourly": {
@@ -26,22 +31,14 @@ export function calculateEarnings(input: {
       return Math.round((ratePaise * totalMinutes) / 60) / 100;
     }
     case "daily":
-      return calculateDaily(ratePaise);
+      return ratePaise / 100;
     case "monthly":
-      return calculateMonthly(ratePaise);
+      return ratePaise / 100;
   }
 }
 
-function calculateDaily(ratePaise: number) {
-  return ratePaise / 100;
-}
-
-function calculateMonthly(ratePaise: number) {
-  return Math.round(ratePaise / WAGE_RULES.monthlyDaysDivisor) / 100;
-}
-
 export function describeCalculation(wageType: WageType): string {
-  if (wageType === "hourly") return "(hours + minutes ÷ 60) × hourly rate";
-  if (wageType === "daily") return "Full daily rate for the day";
-  return `Monthly rate ÷ ${WAGE_RULES.monthlyDaysDivisor} days`;
+  if (wageType === "hourly") return "Hours worked × hourly rate";
+  if (wageType === "daily") return "Manually entered regular earnings";
+  return "Manually entered regular earnings";
 }

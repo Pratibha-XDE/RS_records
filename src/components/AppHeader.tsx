@@ -13,8 +13,8 @@ export function AppHeader() {
         </div>
         <Button
           variant="outline"
-          onClick={() => {
-            authService.logout();
+          onClick={async () => {
+            await authService.logout();
             navigate({ to: "/" });
           }}
         >

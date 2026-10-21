@@ -85,7 +85,7 @@ class DailyWorkRecordSerializer(serializers.ModelSerializer):
         decimal_places=2,
         required=False,
         min_value=Decimal('0.00'),
-        help_text="Actual regular earnings for daily-paid workers. For hourly-paid workers, calculated as hours_worked * wage_rate."
+        help_text="Actual regular earnings for daily-paid and monthly-paid workers. For hourly-paid workers, calculated as hours_worked * wage_rate."
     )
     employee_name = serializers.CharField(source='employee.name', read_only=True)
     total_paid = serializers.SerializerMethodField()
@@ -155,8 +155,8 @@ class DailyWorkRecordSerializer(serializers.ModelSerializer):
         return value
 
     def validate_minutes_worked(self, value):
-        if value is not None and value != 0:
-            raise serializers.ValidationError("Only whole hours worked are accepted.")
+        if value is not None and (value < 0 or value > 59):
+            raise serializers.ValidationError("Minutes worked must be between 0 and 59.")
         return value or 0
 
     def validate_overtime_minutes(self, value):
@@ -207,6 +207,17 @@ class DailyWorkRecordSerializer(serializers.ModelSerializer):
                     raise serializers.ValidationError({
                         'detail': "Cannot change employee or work date of a work record that already has payment history."
                     })
+        else:
+            # For monthly-paid workers, require manual entry of actual regular earnings (base_amount)
+            if attrs.get('base_amount') is None:
+                try:
+                    _, wage_basis, _ = resolve_effective_wage(employee, work_date)
+                    if wage_basis == WageBasis.MONTHLY:
+                        raise serializers.ValidationError({
+                            'base_amount': 'Actual regular earnings (base amount) must be entered manually for monthly-paid work records.'
+                        })
+                except DjangoValidationError:
+                    pass
 
         return attrs
 
@@ -282,8 +293,8 @@ class DailyWorkRecordSerializer(serializers.ModelSerializer):
             wage_rate = instance.wage_rate
             wage_basis = instance.wage_basis
 
-        # Determine manual base amount for daily wage basis
-        if wage_basis == WageBasis.DAILY:
+        # Determine manual base amount for daily and monthly wage basis
+        if wage_basis in (WageBasis.DAILY, WageBasis.MONTHLY):
             manual_base = validated_data.get('base_amount', instance.base_amount)
         else:
             manual_base = None

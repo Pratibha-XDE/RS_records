@@ -9,6 +9,8 @@ import { wageService } from "@/services/wageService";
 import { Field, RupeeInput, WageTypePicker, bigDialog, bigInput } from "./shared";
 import { formatWage } from "@/utils/format";
 
+import { ApiError } from "@/services/api";
+
 export function EmployeeFormDialog({ open, onOpenChange, employee }: { open: boolean; onOpenChange: (o: boolean) => void; employee?: Employee | undefined }) {
   const [name, setName] = useState("");
   const [profile, setProfile] = useState("");
@@ -35,29 +37,55 @@ export function EmployeeFormDialog({ open, onOpenChange, employee }: { open: boo
     e.preventDefault();
     const errs: Partial<Record<"name" | "phone" | "age" | "wage", string>> = {};
     if (!name.trim()) errs.name = "Please enter the employee's name.";
-    if (phone.trim() && !/^\+?[\d\s-]{6,15}$/.test(phone.trim())) errs.phone = "Please enter a valid phone number.";
+    if (phone.trim()) {
+      if (!/^\+?[\d\s-]{6,15}$/.test(phone.trim())) {
+        errs.phone = "Please enter a valid phone number.";
+      } else {
+        const cleanPhone = phone.trim().replace(/[\s-]/g, "");
+        const allEmployees = employeeService.listAllSync();
+        const existing = allEmployees.find(
+          (e) => e.phone && e.phone.trim().replace(/[\s-]/g, "") === cleanPhone && (!employee || e.id !== employee.id),
+        );
+        if (existing) {
+          errs.phone = `An employee with phone number '${phone.trim()}' already exists (${existing.name}). Please update their existing profile instead.`;
+        }
+      }
+    }
     if (age && (!Number.isInteger(Number(age)) || Number(age) <= 0 || Number(age) > 120)) errs.age = "Age must be a positive number.";
     if (wage && (isNaN(Number(wage)) || Number(wage) < 0)) errs.wage = "Wage must be 0 or more.";
     setErrors(errs);
     if (Object.keys(errs).length) return;
     setSaving(true);
-    const input = {
-      name,
-      workProfile: profile,
-      phone,
-      age: age ? Number(age) : undefined,
-      wageAmount: wage ? Number(wage) : undefined,
-      wageType,
-    };
-    if (employee) {
-      await employeeService.update(employee.id, input);
-      toast.success("Employee updated successfully.");
-    } else {
-      await employeeService.create(input);
-      toast.success("Employee added successfully.");
+    try {
+      const input = {
+        name,
+        workProfile: profile,
+        phone,
+        age: age ? Number(age) : undefined,
+        wageAmount: wage ? Number(wage) : undefined,
+        wageType,
+      };
+      if (employee) {
+        await employeeService.update(employee.id, input);
+        toast.success("Employee updated successfully.");
+      } else {
+        await employeeService.create(input);
+        toast.success("Employee added successfully.");
+      }
+      onOpenChange(false);
+    } catch (err: unknown) {
+      if (err instanceof ApiError && err.fieldErrors) {
+        const formErrors: Partial<Record<"name" | "phone" | "age" | "wage", string>> = {};
+        if (err.fieldErrors["name"]) formErrors["name"] = err.fieldErrors["name"].join(" ");
+        if (err.fieldErrors["phone_number"]) formErrors["phone"] = err.fieldErrors["phone_number"].join(" ");
+        if (err.fieldErrors["age"]) formErrors["age"] = err.fieldErrors["age"].join(" ");
+        if (err.fieldErrors["wage_amount"]) formErrors["wage"] = err.fieldErrors["wage_amount"].join(" ");
+        setErrors((prev) => ({ ...prev, ...formErrors }));
+      }
+      toast.error(err instanceof Error ? err.message : "Failed to save employee.");
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
-    onOpenChange(false);
   }
 
   return (

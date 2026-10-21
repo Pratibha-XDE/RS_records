@@ -349,3 +349,155 @@ class EmployeeAPITests(TestCase):
         self.assertEqual(response.data['applicable_wage_rate'], '750.00')
         self.assertEqual(response.data['applicable_wage_basis'], 'daily')
 
+    def test_financial_summary_empty_organization(self):
+        self.client.force_authenticate(user=self.admin_user)
+        # Delete existing employee to test truly empty state
+        Employee.objects.all().delete()
+        response = self.client.get('/api/employees/financial_summary/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['total_employees'], 0)
+        self.assertEqual(response.data['active_employees'], 0)
+        self.assertEqual(response.data['inactive_employees'], 0)
+        self.assertEqual(response.data['total_earnings'], '0.00')
+        self.assertEqual(response.data['total_paid'], '0.00')
+        self.assertEqual(response.data['outstanding_balance'], '0.00')
+        self.assertEqual(response.data['work_record_count'], 0)
+        self.assertEqual(response.data['unpaid_record_count'], 0)
+        self.assertEqual(response.data['partially_paid_record_count'], 0)
+        self.assertEqual(response.data['paid_record_count'], 0)
+
+    def test_financial_summary_with_records_and_payments(self):
+        self.client.force_authenticate(user=self.admin_user)
+        # Create second employee (inactive)
+        emp2 = Employee.objects.create(name="Inactive Worker", is_active=False)
+
+        # Record 1 on emp1: Total 1000, Paid 0 -> unpaid
+        DailyWorkRecord.objects.create(
+            employee=self.employee,
+            work_date=datetime.date(2026, 10, 1),
+            hours_worked=8,
+            wage_rate=Decimal('1000.00'),
+            wage_basis='daily',
+            base_amount=Decimal('1000.00'),
+            total_earnings=Decimal('1000.00')
+        )
+
+        # Record 2 on emp1: Total 1000, Paid 400 -> partially_paid
+        r2 = DailyWorkRecord.objects.create(
+            employee=self.employee,
+            work_date=datetime.date(2026, 10, 2),
+            hours_worked=8,
+            wage_rate=Decimal('1000.00'),
+            wage_basis='daily',
+            base_amount=Decimal('1000.00'),
+            total_earnings=Decimal('1000.00')
+        )
+        Payment.objects.create(work_record=r2, amount=Decimal('400.00'), payment_date=datetime.date(2026, 10, 2))
+
+        # Record 3 on emp2: Total 800, Paid 800 -> paid
+        r3 = DailyWorkRecord.objects.create(
+            employee=emp2,
+            work_date=datetime.date(2026, 10, 3),
+            hours_worked=8,
+            wage_rate=Decimal('800.00'),
+            wage_basis='daily',
+            base_amount=Decimal('800.00'),
+            total_earnings=Decimal('800.00')
+        )
+        Payment.objects.create(work_record=r3, amount=Decimal('800.00'), payment_date=datetime.date(2026, 10, 3))
+
+        response = self.client.get('/api/employees/financial_summary/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['total_employees'], 2)
+        self.assertEqual(response.data['active_employees'], 1)
+        self.assertEqual(response.data['inactive_employees'], 1)
+        # Total earnings = 1000 + 1000 + 800 = 2800.00
+        self.assertEqual(response.data['total_earnings'], '2800.00')
+        # Total paid = 400 + 800 = 1200.00
+        self.assertEqual(response.data['total_paid'], '1200.00')
+        # Outstanding = 2800 - 1200 = 1600.00
+        self.assertEqual(response.data['outstanding_balance'], '1600.00')
+        self.assertEqual(response.data['work_record_count'], 3)
+        self.assertEqual(response.data['unpaid_record_count'], 1)
+        self.assertEqual(response.data['partially_paid_record_count'], 1)
+        self.assertEqual(response.data['paid_record_count'], 1)
+
+    def test_dashboard_summary_alias_endpoint(self):
+        self.client.force_authenticate(user=self.admin_user)
+        resp1 = self.client.get('/api/employees/financial_summary/')
+        resp2 = self.client.get('/api/employees/dashboard_summary/')
+        self.assertEqual(resp1.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp2.status_code, status.HTTP_200_OK)
+
+    def test_financial_summary_forbidden_for_non_staff(self):
+        self.client.force_authenticate(user=self.regular_user)
+        response = self.client.get('/api/employees/financial_summary/')
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_duplicate_employee_with_same_phone_rejected(self):
+        self.client.force_authenticate(user=self.admin_user)
+        # Attempt to create an employee with the same phone number as self.employee (9988776655)
+        payload = {
+            'name': 'Vijay Duplicate',
+            'phone_number': '9988776655',
+            'age': 35
+        }
+        response = self.client.post('/api/employees/', payload)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('phone_number', response.data)
+        self.assertIn('already exists', str(response.data['phone_number']))
+
+    def test_different_employees_with_same_name_allowed(self):
+        self.client.force_authenticate(user=self.admin_user)
+        # Creating another employee with the same name "Vijay Kumar" but a different phone number must be allowed
+        payload = {
+            'name': 'Vijay Kumar',
+            'phone_number': '9111222333',
+            'age': 40
+        }
+        response = self.client.post('/api/employees/', payload)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(Employee.objects.filter(name='Vijay Kumar').count(), 2)
+
+    def test_update_employee_wage_does_not_create_new_profile_and_preserves_history(self):
+        self.client.force_authenticate(user=self.admin_user)
+        from wages.models import EmployeeWageRate
+        # Initial wage rate
+        r1 = EmployeeWageRate.objects.create(
+            employee=self.employee,
+            wage_amount=Decimal('500.00'),
+            wage_basis='daily',
+            effective_from=datetime.date(2026, 10, 1)
+        )
+        # Existing work record created under r1
+        rec = DailyWorkRecord.objects.create(
+            employee=self.employee,
+            work_date=datetime.date(2026, 10, 1),
+            wage_rate=Decimal('500.00'),
+            wage_basis='daily',
+            base_amount=Decimal('500.00'),
+            total_earnings=Decimal('500.00')
+        )
+        emp_count_before = Employee.objects.count()
+
+        # Update employee wage rate directly without creating new employee
+        r1.effective_to = datetime.date(2026, 10, 20)
+        r1.save()
+        EmployeeWageRate.objects.create(
+            employee=self.employee,
+            wage_amount=Decimal('600.00'),
+            wage_basis='hourly',
+            effective_from=datetime.date(2026, 10, 21)
+        )
+
+        emp_count_after = Employee.objects.count()
+        self.assertEqual(emp_count_before, emp_count_after)
+
+        # Historical work record retains snapshot rate
+        rec.refresh_from_db()
+        self.assertEqual(rec.wage_rate, Decimal('500.00'))
+        self.assertEqual(rec.wage_basis, 'daily')
+        self.assertEqual(rec.total_earnings, Decimal('500.00'))
+
+
+

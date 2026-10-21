@@ -231,3 +231,37 @@ class WageAPITests(TestCase):
         }
         response = self.client.post('/api/wages/global/', payload)
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_create_and_resolve_monthly_wage_setting(self):
+        self.client.force_authenticate(user=self.admin_user)
+        # Create global monthly wage
+        payload = {
+            'wage_amount': '30000.00',
+            'wage_basis': 'monthly',
+            'effective_from': '2026-01-01'
+        }
+        response = self.client.post('/api/wages/global/', payload)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['wage_basis'], 'monthly')
+        self.assertEqual(response.data['wage_amount'], '30000.00')
+
+        # Check resolution for employee
+        amount, basis, _ = resolve_effective_wage(self.employee, datetime.date(2026, 6, 1))
+        self.assertEqual(amount, Decimal('30000.00'))
+        self.assertEqual(basis, 'monthly')
+
+    def test_create_employee_specific_monthly_wage_rate_api(self):
+        self.client.force_authenticate(user=self.admin_user)
+        payload = {
+            'wage_amount': '45000.00',
+            'wage_basis': 'monthly',
+            'effective_from': '2026-01-01'
+        }
+        response = self.client.post(f'/api/employees/{self.employee.id}/wage-rates/', payload)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data['wage_basis'], 'monthly')
+        self.assertEqual(response.data['wage_amount'], '45000.00')
+
+        amount, basis, _ = resolve_effective_wage(self.employee, datetime.date(2026, 2, 1))
+        self.assertEqual(amount, Decimal('45000.00'))
+        self.assertEqual(basis, 'monthly')

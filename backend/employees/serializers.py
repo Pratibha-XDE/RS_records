@@ -57,6 +57,22 @@ class EmployeeSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Employee name cannot be blank.")
         return stripped
 
+    def validate_phone_number(self, value):
+        if value:
+            stripped = value.strip()
+            if stripped:
+                qs = Employee.objects.filter(phone_number__iexact=stripped)
+                if self.instance:
+                    qs = qs.exclude(id=self.instance.id)
+                if qs.exists():
+                    existing = qs.first()
+                    raise serializers.ValidationError(
+                        f"An employee with phone number '{stripped}' already exists ({existing.name}). "
+                        "Please update their existing profile instead of creating a duplicate."
+                    )
+                return stripped
+        return None
+
 
 class EmployeeBalanceSummarySerializer(serializers.Serializer):
     """
@@ -72,4 +88,21 @@ class EmployeeBalanceSummarySerializer(serializers.Serializer):
     unpaid_record_count = serializers.IntegerField(read_only=True)
     partially_paid_record_count = serializers.IntegerField(read_only=True)
     paid_record_count = serializers.IntegerField(read_only=True)
+
+
+class DashboardFinancialSummarySerializer(serializers.Serializer):
+    """
+    Serializer for aggregate dashboard financial summary across the entire organization.
+    """
+    total_employees = serializers.IntegerField(read_only=True)
+    active_employees = serializers.IntegerField(read_only=True)
+    inactive_employees = serializers.IntegerField(read_only=True)
+    total_earnings = serializers.CharField(read_only=True)
+    total_paid = serializers.CharField(read_only=True)
+    outstanding_balance = serializers.CharField(read_only=True)
+    work_record_count = serializers.IntegerField(read_only=True)
+    unpaid_record_count = serializers.IntegerField(read_only=True)
+    partially_paid_record_count = serializers.IntegerField(read_only=True)
+    paid_record_count = serializers.IntegerField(read_only=True)
+
 

@@ -3,14 +3,17 @@ import { useEffect, useState } from "react";
 import { Eye, EyeOff, Loader2, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, bigInput } from "@/components/shared";
-import { authService, DEMO_CREDENTIALS } from "@/services/authService";
+import { authService } from "@/services/authService";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
       { title: "Login — Daily Wage Calculator" },
-      { name: "description", content: "Sign in to manage employees, working hours and daily wages." },
+      {
+        name: "description",
+        content: "Sign in to manage employees, working hours and daily wages.",
+      },
       { property: "og:title", content: "Daily Wage Calculator" },
       { property: "og:description", content: "Manage employees and daily wages from your phone." },
     ],
@@ -35,10 +38,18 @@ function LoginPage() {
     if (!username.trim() || !password) return setError("Please enter your username and password.");
     setError("");
     setLoading(true);
-    const ok = await authService.login(username, password);
-    setLoading(false);
-    if (ok) navigate({ to: "/dashboard" });
-    else setError("Wrong username or password. Please try again.");
+    try {
+      await authService.login(username, password);
+      navigate({ to: "/dashboard" });
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError("Invalid username or password. Please try again.");
+      }
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -51,26 +62,49 @@ function LoginPage() {
           <h1 className="text-2xl font-bold">Daily Wage Calculator</h1>
           <p className="mt-1 text-muted-foreground">Manage employees and daily wages.</p>
         </div>
-        <form onSubmit={submit} className="space-y-4 rounded-2xl border-2 border-border p-5 shadow-card" noValidate>
+        <form
+          onSubmit={submit}
+          className="space-y-4 rounded-2xl border-2 border-border p-5 shadow-card"
+          noValidate
+        >
           <Field label="Username or Email" htmlFor="u">
-            <input id="u" autoComplete="username" className={bigInput} value={username} onChange={(e) => setUsername(e.target.value)} />
+            <input
+              id="u"
+              autoComplete="username"
+              className={bigInput}
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+            />
           </Field>
           <Field label="Password" htmlFor="p">
             <div className="relative">
-              <input id="p" type={show ? "text" : "password"} autoComplete="current-password" className={cn(bigInput, "pr-12")} value={password} onChange={(e) => setPassword(e.target.value)} />
-              <button type="button" onClick={() => setShow((s) => !s)} aria-label={show ? "Hide password" : "Show password"} className="absolute right-1 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground">
+              <input
+                id="p"
+                type={show ? "text" : "password"}
+                autoComplete="current-password"
+                className={cn(bigInput, "pr-12")}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              <button
+                type="button"
+                onClick={() => setShow((s) => !s)}
+                aria-label={show ? "Hide password" : "Show password"}
+                className="absolute right-1 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground"
+              >
                 {show ? <EyeOff className="size-5" /> : <Eye className="size-5" />}
               </button>
             </div>
           </Field>
-          {error && <p role="alert" className="text-sm font-medium text-destructive">{error}</p>}
+          {error && (
+            <p role="alert" className="text-sm font-medium text-destructive">
+              {error}
+            </p>
+          )}
           <Button type="submit" size="xl" className="w-full" disabled={loading}>
             {loading && <Loader2 className="animate-spin" />} Login
           </Button>
         </form>
-        <p className="mt-4 text-center text-sm text-muted-foreground">
-          Demo only — username <b>{DEMO_CREDENTIALS.username}</b>, password <b>{DEMO_CREDENTIALS.password}</b>
-        </p>
       </div>
     </main>
   );

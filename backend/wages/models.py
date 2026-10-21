@@ -7,6 +7,7 @@ from django.db import models
 class WageBasis(models.TextChoices):
     HOURLY = 'hourly', 'Hourly'
     DAILY = 'daily', 'Daily'
+    MONTHLY = 'monthly', 'Monthly'
 
 
 class GlobalWageSetting(models.Model):
@@ -23,7 +24,7 @@ class GlobalWageSetting(models.Model):
         max_length=20,
         choices=WageBasis.choices,
         default=WageBasis.DAILY,
-        help_text="Wage basis (hourly or daily)."
+        help_text="Wage basis (hourly, daily, or monthly)."
     )
     effective_from = models.DateField(
         help_text="Date from which this global wage setting takes effect."
@@ -87,7 +88,7 @@ class EmployeeWageRate(models.Model):
         max_length=20,
         choices=WageBasis.choices,
         default=WageBasis.DAILY,
-        help_text="Wage basis (hourly or daily)."
+        help_text="Wage basis (hourly, daily, or monthly)."
     )
     effective_from = models.DateField(
         help_text="Date from which this wage rate takes effect."

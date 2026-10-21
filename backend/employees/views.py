@@ -13,7 +13,11 @@ from work_records.models import DailyWorkRecord, Payment
 from work_records.serializers import DailyWorkRecordSerializer
 from work_records.services import quantize_currency
 from .models import Employee
-from .serializers import EmployeeBalanceSummarySerializer, EmployeeSerializer
+from .serializers import (
+    DashboardFinancialSummarySerializer,
+    EmployeeBalanceSummarySerializer,
+    EmployeeSerializer,
+)
 
 
 @extend_schema_view(
@@ -173,4 +177,63 @@ class EmployeeViewSet(viewsets.ModelViewSet):
 
         serializer = DailyWorkRecordSerializer(records, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        summary="Get overall dashboard financial summary",
+        description="Returns aggregate financial summary (employee counts, earnings, payments, balance, record status counts) across all employees.",
+        responses={200: DashboardFinancialSummarySerializer}
+    )
+    @action(detail=False, methods=['get'], url_path='financial_summary')
+    def financial_summary(self, request):
+        total_employees = Employee.objects.count()
+        active_employees = Employee.objects.filter(is_active=True).count()
+        inactive_employees = Employee.objects.filter(is_active=False).count()
+
+        total_earnings = DailyWorkRecord.objects.aggregate(
+            total=Sum('total_earnings')
+        )['total'] or Decimal('0.00')
+
+        total_paid = Payment.objects.aggregate(
+            total=Sum('amount')
+        )['total'] or Decimal('0.00')
+
+        total_earnings = quantize_currency(total_earnings)
+        total_paid = quantize_currency(total_paid)
+        outstanding_balance = max(Decimal('0.00'), total_earnings - total_paid)
+
+        annotated_records = DailyWorkRecord.objects.annotate(
+            rec_paid=Coalesce(Sum('payments__amount'), Value(Decimal('0.00')))
+        )
+
+        counts = annotated_records.aggregate(
+            total_count=Count('id'),
+            unpaid_count=Count('id', filter=Q(rec_paid=Decimal('0.00'), total_earnings__gt=Decimal('0.00'))),
+            partial_count=Count('id', filter=Q(rec_paid__gt=Decimal('0.00'), rec_paid__lt=F('total_earnings'))),
+            paid_count=Count('id', filter=Q(rec_paid__gte=F('total_earnings')) | Q(total_earnings=Decimal('0.00'))),
+        )
+
+        data = {
+            'total_employees': total_employees,
+            'active_employees': active_employees,
+            'inactive_employees': inactive_employees,
+            'total_earnings': str(total_earnings),
+            'total_paid': str(total_paid),
+            'outstanding_balance': str(outstanding_balance),
+            'work_record_count': counts['total_count'] or 0,
+            'unpaid_record_count': counts['unpaid_count'] or 0,
+            'partially_paid_record_count': counts['partial_count'] or 0,
+            'paid_record_count': counts['paid_count'] or 0,
+        }
+
+        return Response(data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        summary="Get overall dashboard financial summary (alias)",
+        description="Alias endpoint for /api/employees/financial_summary/.",
+        responses={200: DashboardFinancialSummarySerializer}
+    )
+    @action(detail=False, methods=['get'], url_path='dashboard_summary')
+    def dashboard_summary(self, request):
+        return self.financial_summary(request)
+
 
